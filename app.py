@@ -5,6 +5,16 @@ from config import Config
 import logging
 import os
 
+# Map incoming assignee names to specific ID numbers
+ASSIGNEE_TO_ID = {
+    "Mahmoud Dana": 269,
+    "Farouk Elewi": 291,
+    "Jessica Espanola": 110,
+    "Sajjad Rehman": 272,
+    "Mansour -": 270,
+    "Noor Barakat": 271,
+}
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,26 +72,31 @@ def contact_webhook():
         # Extract assignee name
         assignee_info = contact.get('assignee', {})
         assignee_name = None
+        assignee_mapped_id = None
         
         if assignee_info:
             first_name = assignee_info.get('firstName', '')
             last_name = assignee_info.get('lastName', '')
             if first_name or last_name:
                 assignee_name = f"{first_name} {last_name}".strip()
+                # Map the full name to an ID if available
+                assignee_mapped_id = ASSIGNEE_TO_ID.get(assignee_name)
         
         # Check if assignment exists
         assignment = Assignment.query.filter_by(customer_phone=phone).first()
         
         if assignment:
             # Update existing assignment
-            assignment.assignee = assignee_name
+            # Store mapped ID if found, otherwise store the name
+            assignment.assignee = str(assignee_mapped_id) if assignee_mapped_id is not None else assignee_name
             logger.info(f"Updated assignment for {phone}: {assignee_name}")
             action = 'updated'
         else:
             # Create new assignment
             assignment = Assignment(
                 customer_phone=phone,
-                assignee=assignee_name
+                # Store mapped ID if found, otherwise store the name
+                assignee=(str(assignee_mapped_id) if assignee_mapped_id is not None else assignee_name)
             )
             db.session.add(assignment)
             logger.info(f"Created new assignment for {phone}: {assignee_name}")
