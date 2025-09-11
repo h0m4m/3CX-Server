@@ -13,6 +13,8 @@ ASSIGNEE_TO_ID = {
     "Sajjad Rehman": 272,
     "Mansour -": 270,
     "Noor Barakat": 271,
+    "Mohamed Al Nour": 806,
+    "Adnan fayed": 806,
 }
 
 # Configure logging
