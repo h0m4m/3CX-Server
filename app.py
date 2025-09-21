@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_migrate import Migrate
 from models import db, Assignment
 from config import Config
 import logging
 import os
+from time import perf_counter
 
 # Map incoming assignee names to specific ID numbers
 ASSIGNEE_TO_ID = {
@@ -18,12 +19,46 @@ ASSIGNEE_TO_ID = {
 }
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+LOG_FORMAT = "[%(asctime)s] %(levelname)s in %(name)s: %(message)s"
+
+
+def configure_logging(app=None):
+    formatter = logging.Formatter(LOG_FORMAT)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    if not root_logger.handlers:
+        root_handler = logging.StreamHandler()
+        root_handler.setFormatter(formatter)
+        root_logger.addHandler(root_handler)
+    else:
+        for handler in root_logger.handlers:
+            handler.setFormatter(formatter)
+
+    if app is not None:
+        app_handler = logging.StreamHandler()
+        app_handler.setFormatter(formatter)
+        app.logger.handlers = [app_handler]
+        app.logger.setLevel(logging.INFO)
+        app.logger.propagate = False
+
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_handler = logging.StreamHandler()
+    werkzeug_handler.setFormatter(formatter)
+    werkzeug_logger.handlers = [werkzeug_handler]
+    werkzeug_logger.setLevel(logging.INFO)
+    werkzeug_logger.propagate = False
+
+
+configure_logging()
+logger = logging.getLogger('3cx_server')
+logger.setLevel(logging.INFO)
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    configure_logging(app)
     
     # Initialize database
     db.init_app(app)
@@ -34,6 +69,67 @@ def create_app():
     return app
 
 app = create_app()
+
+
+@app.before_request
+def log_request_event():
+    g.request_start_time = perf_counter()
+    full_path = request.full_path if request.query_string else request.path
+    raw_body = request.get_data(cache=True)
+    body_text = None
+    if raw_body:
+        try:
+            decoded = raw_body.decode('utf-8')
+        except UnicodeDecodeError:
+            body_text = '<binary payload>'
+        else:
+            body_text = decoded if len(decoded) <= 1000 else f"{decoded[:1000]}... [truncated]"
+
+    if body_text:
+        logger.info("→ %s %s body=%s", request.method, full_path, body_text)
+    else:
+        logger.info("→ %s %s", request.method, full_path)
+
+
+@app.after_request
+def log_response_event(response):
+    duration_ms = None
+    if hasattr(g, 'request_start_time'):
+        duration_ms = (perf_counter() - g.request_start_time) * 1000
+
+    full_path = request.full_path if request.query_string else request.path
+    log_parts = [f"← {request.method} {full_path}", str(response.status_code)]
+
+    if duration_ms is not None:
+        log_parts.append(f"{duration_ms:.2f}ms")
+
+    response_body_summary = None
+    if not response.direct_passthrough:
+        response_bytes = response.get_data()
+        if response_bytes:
+            try:
+                charset = response.charset or 'utf-8'
+            except AttributeError:
+                charset = 'utf-8'
+            try:
+                response_text = response_bytes.decode(charset)
+            except (UnicodeDecodeError, LookupError):
+                response_body_summary = '<binary payload>'
+            else:
+                response_body_summary = response_text if len(response_text) <= 1000 else f"{response_text[:1000]}... [truncated]"
+
+    if response_body_summary:
+        log_parts.append(f"body={response_body_summary}")
+
+    logger.info(" ".join(log_parts))
+    return response
+
+
+@app.route('/', methods=['GET'])
+def index():
+    """Root endpoint for quick sanity checks"""
+    return jsonify({'message': 'Hello, World!'})
+
 
 @app.route('/health', methods=['GET'])
 def health_check():
