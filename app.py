@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, g
-from flask_migrate import Migrate
 from models import db, Assignment
 from config import Config
 import logging
@@ -56,16 +55,58 @@ logger.setLevel(logging.INFO)
 
 def create_app():
     app = Flask(__name__)
-    app.config.from_object(Config)
 
+    # Configure logging first
     configure_logging(app)
-    
+
+    try:
+        # Load configuration (will validate database URL)
+        app.config.from_object(Config)
+        logger.info("✓ Configuration loaded successfully")
+    except Exception as e:
+        logger.critical("=" * 80)
+        logger.critical("FAILED TO LOAD CONFIGURATION")
+        logger.critical("=" * 80)
+        logger.critical("Error: %s", str(e))
+        logger.critical("=" * 80)
+        raise
+
     # Initialize database
     db.init_app(app)
-    
-    # Initialize Flask-Migrate
-    migrate = Migrate(app, db)
-    
+
+    # Test database connection on startup
+    try:
+        with app.app_context():
+            db.engine.connect()
+            logger.info("=" * 80)
+            logger.info("✓ DATABASE CONNECTION SUCCESSFUL")
+            logger.info("=" * 80)
+            server_info = app.config['SQLALCHEMY_DATABASE_URI'].split('@')[1].split('?')[0] if '@' in app.config['SQLALCHEMY_DATABASE_URI'] else 'database'
+            logger.info("Connected to: %s", server_info)
+            logger.info("=" * 80)
+    except Exception as e:
+        logger.critical("=" * 80)
+        logger.critical("DATABASE CONNECTION FAILED")
+        logger.critical("=" * 80)
+        logger.critical("Could not connect to MS SQL Server.")
+        logger.critical("Error: %s", str(e))
+        logger.critical("")
+        logger.critical("Common causes:")
+        logger.critical("  1. Wrong database URL in db_config.py")
+        logger.critical("  2. Database server is not accessible")
+        logger.critical("  3. Incorrect username or password")
+        logger.critical("  4. Database does not exist")
+        logger.critical("  5. ODBC driver not installed on this server")
+        logger.critical("  6. Firewall blocking connection")
+        logger.critical("")
+        logger.critical("Please verify:")
+        logger.critical("  • Database URL in db_config.py is correct")
+        logger.critical("  • Database server is running and accessible")
+        logger.critical("  • Network/firewall allows connection to database")
+        logger.critical("  • ODBC driver is installed (check with: odbcinst -q -d)")
+        logger.critical("=" * 80)
+        raise RuntimeError("Database connection failed. Check logs above for details.") from e
+
     return app
 
 app = create_app()
@@ -246,8 +287,6 @@ def get_assignment_by_phone(phone):
         return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     # Use PORT environment variable if set, otherwise default to 8000
     port = int(os.environ.get('PORT', 8000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    app.run(debug=False, host='0.0.0.0', port=port)

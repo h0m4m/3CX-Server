@@ -1,60 +1,62 @@
 import os
 import logging
-from dotenv import load_dotenv
 
-# Load environment variables from .env file if it exists
-load_dotenv()
+logger = logging.getLogger('3cx_server.config')
 
-# Get the directory where this config file is located
-basedir = os.path.abspath(os.path.dirname(__file__))
+try:
+    from db_config import MSSQL_DATABASE_URL
+except ImportError as e:
+    logger.critical("=" * 80)
+    logger.critical("DATABASE CONFIGURATION ERROR")
+    logger.critical("=" * 80)
+    logger.critical("Failed to import database configuration from db_config.py")
+    logger.critical("Error: %s", str(e))
+    logger.critical("Please ensure db_config.py exists and is properly configured.")
+    logger.critical("=" * 80)
+    raise RuntimeError("Database configuration file missing or invalid") from e
 
 class Config:
-    """Application configuration class with production-ready error handling."""
+    """Application configuration for MS SQL Server."""
 
     def __init__(self):
-        self._validate_environment()
+        self._validate_database_url()
 
-    def _validate_environment(self):
-        """Validate that required environment variables are set."""
-        database_uri = self.SQLALCHEMY_DATABASE_URI
-        if not database_uri:
-            error_msg = (
-                "Database configuration error: SQLALCHEMY_DATABASE_URI is not set. "
-                "Please ensure DATABASE_URL environment variable is configured or "
-                "the default SQLite path is accessible."
+    def _validate_database_url(self):
+        """Validate that the database URL has been configured."""
+        if not MSSQL_DATABASE_URL or MSSQL_DATABASE_URL == "mssql+pyodbc://username:password@server/database?driver=ODBC+Driver+17+for+SQL+Server":
+            logger.critical("=" * 80)
+            logger.critical("DATABASE CONFIGURATION ERROR")
+            logger.critical("=" * 80)
+            logger.critical("The database URL has not been configured!")
+            logger.critical("Please edit db_config.py and set your MS SQL database URL.")
+            logger.critical("Current value: %s", MSSQL_DATABASE_URL)
+            logger.critical("=" * 80)
+            raise RuntimeError(
+                "Database URL not configured. Please edit db_config.py with your MS SQL connection string."
             )
-            logging.error(error_msg)
-            raise RuntimeError(error_msg)
 
-    # Database connection string with production-ready fallback
-    @property
-    def SQLALCHEMY_DATABASE_URI(self):
-        """Get database URI with proper fallback handling."""
-        database_url = os.environ.get('DATABASE_URL')
+        # Check if it's a valid MS SQL connection string format
+        if not MSSQL_DATABASE_URL.startswith('mssql+pyodbc://'):
+            logger.critical("=" * 80)
+            logger.critical("INVALID DATABASE URL FORMAT")
+            logger.critical("=" * 80)
+            logger.critical("The database URL must be a MS SQL connection string.")
+            logger.critical("Expected format: mssql+pyodbc://username:password@server/database?driver=...")
+            logger.critical("Current value: %s", MSSQL_DATABASE_URL)
+            logger.critical("=" * 80)
+            raise RuntimeError(
+                "Invalid database URL format. Must start with 'mssql+pyodbc://'"
+            )
 
-        # If DATABASE_URL is not set, use SQLite as fallback
-        if not database_url:
-            sqlite_path = os.path.join(basedir, "assignment.db")
-            database_url = f'sqlite:///{sqlite_path}'
-
-            # Log the fallback in production
-            if os.environ.get('FLASK_ENV') == 'production':
-                logging.warning(f"Using SQLite fallback database at: {sqlite_path}")
-
-        return database_url
+    # MS SQL Database connection string
+    SQLALCHEMY_DATABASE_URI = MSSQL_DATABASE_URL
 
     # Disable modification tracking to save resources
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # Echo SQL queries in development mode for debugging
-    @property
-    def SQLALCHEMY_ECHO(self):
-        return os.environ.get('FLASK_ENV') == 'development'
+    # Disable SQL echo in production
+    SQLALCHEMY_ECHO = False
 
-    # Additional production configurations
+    # Security configurations
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
-
-    # Security configurations for production
-    @property
-    def PREFERRED_URL_SCHEME(self):
-        return 'https' if os.environ.get('FLASK_ENV') == 'production' else 'http'
+    PREFERRED_URL_SCHEME = 'https'
